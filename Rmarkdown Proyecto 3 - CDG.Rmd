@@ -1,0 +1,268 @@
+---
+title: "Proyecto 3 - CDG"
+output: html_document
+date: '2022-07-03'
+---
+Nombres: 
+Francisco Reyes
+Valeria Pichott
+Moussa Saker
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Área de estudio:
+Para este trabajo se decidió usar la comuna de Las Condes de la región metropolitana, seleccionando tanto casas como departamentos, y también, seleccionamos únicamente las variables que consideramos que podrían llegar a tener algún impacto en el precio de las viviendas, tales como; El avalúo fiscal, el año de inscripción en el CBR, el año de construcción de la vivienda, cantidad a pagar en las contribuciones, los metros cuadrados de superficie de terreno como también los de superficie construida, cuántos estacionamientos tiene, índice de moran local para casas y departamentos, las distintas cantidades de habitantes y sus proporciones. 
+También se consideraron muchas variables con respecto a las manzanas de las viviendas, como;  el número de manzana del SII, el UF/m2 promedio para casas y  departamentos, población flotante, el índice de vegetación, el área, la densidad poblacional.
+Por otro lado se usaron aquellas variables en relación a las distancias y establecimientos, tales como; el tiempo en transporte privado a SC más cercano, a un SC CBD, al Golf, a Nueva las Condes, a Providencia. También es importante saber si se tiene un subcentro, metro, colegio o centro educacional, jardín, áreas verdes, comercio, centro de salud, distintos servicios y barrios de oficina a menos de 15, 10 y 5 minutos de distancia. 
+	Por último, y el más importante, el valor de la vivienda en UF. Con esta variable es con la que se va a comparar los resultados y concluir sobre los precios de la viviendas.
+	Variables como la dirección de la vivienda, la fecha de inscripción en el CBR, nombre de la calle, código de la comuna, etc. no fueron consideradas en el estudio porque se consideran intrascendentes en la variabilidad del precio. 
+
+Hipótesis: 
+Analizar qué factores afectan el precio de las viviendas de forma general, utilizando el método de clustering para realizar agrupaciones por similitudes, y así encontrar parámetros que afecten el precio de las viviendas ubicadas en la comuna de Las Condes. 
+Las variables relacionadas a características de la vivienda, como lo pueden ser el año de construcción, el número de estacionamiento, los m2 cuadrados de superficie del terreno, entre otras, y el tiempo de traslado a los diferentes subcentros en las Condes, son las que mejor clasifican las agrupaciones de las viviendas y las que mayor impacto tienen en los precios de estas.
+
+```{r}
+# Importamos las librerias
+pacman::p_load(rgdal, rgeos, stars, spatstat, spdep, sf, raster, tidyverse,
+               spatialreg, tidyverse, vapour, gstat, MASS, spdep, tmap, mapview,foreign,factoextra,dplyr,e1071,
+               caret,paran,fpc)
+```
+
+```{r}
+#Cargamos los datos
+data = read.dbf('RM_SII_CBR2.dbf')
+geom = st_read('RM_SII_CBR2.shp')
+```
+
+# Limpieza de datos
+Procesamiento y limpieza de datos:
+	Para el procesamiento y limpieza de datos lo primero que se realizó fue seleccionar las variables de interés del archivo de base de datos dBase (.dbf) y del archivo de ubicación geométrica (.shp). Luego se reemplazaron las variables nulas de cada columna por el promedio de los valores de dichas columnas y así tener un mejor procesamiento de la data, sin datos que nos ensucien el análisis. 
+	Por otro lado, se realizó un PCA (Análisis de componentes principales)  para determinar cuáles son las variables que más información aportan, ya que, como existen muchas variables, este método estadístico permite simplificar la complejidad de espacios muestrales  con muchas dimensiones a la vez que conserva su información. Entregando un número de componentes que logran “resumir” la información de la data.
+	De este estudio uno logra obtener cierta cantidad de componentes pero que a continuación se calcula los eigenvalues, los cuales nos ayudan a retener las componentes que más importancia tienen, obteniendo 13 componentes importantes de dicho proceso. Posteriormente, se ve cuales son las variables que tienen más peso tienen, en términos de información, para cada componentes. 
+Así fue como para el primer componente se tiene que la variable TPR_ElGolf es la que más información aporta, para el segundo componente es la variable Depto_UFPr. para el tercero es EDUCACION, para el cuarto es CONTRIBUCION, para el quinto es C2_12, etc.
+
+```{r}
+#--------------------Limpieza de datos----------------
+#Seleccionamos la comuna de las condes
+datos_lascondes = data %>% dplyr::filter(COMUNA == 'LAS CONDES') 
+geom_las_condes = geom %>% dplyr::filter(COMUNA == 'LAS CONDES')
+
+#Seleccionamos las columnas para nuestro análisis
+data_s = datos_lascondes %>% dplyr::select(AVALUO, ANO, ANO_CONSTR, MANZ,CONTRIBUCI,SUP_TERR,ANO_CONSTR,SUP_CONSTR,UF_TRANS,ESTACIONAM,SC_TPRIV,
+                                TPR_CBD,TPR_ElGolf,TPR_NvaLCo,TPR_Provi,Casas_UFPr,Depto_UFPr,IMORANCASA,IMORANDPTO,ABC1_12,
+                                C2_12,C3_12,D_12,E_12,ABC1_12P,C2_12P,C3_12P,D_12P,E_12P,POB_FLOT,Por_veg_pr,HA_MZ,DEN_MZ,SC_15MIN,
+                                Ten_Metro,Ten_MetroC,COLE_5MIN,COLE_10MIN,COLE_10MIN,JARDIN_5M,JARDIN_10M,JARDIN_15M,AV_15_MIN,
+                                COMERCIO,EDUCACION,SALUD,SERVICIOS,OFICINA,IMORANCASA,IMORANDPTO)
+
+geom_s = geom_las_condes %>% dplyr::select(AVALUO, ANO, ANO_CONSTR, MANZ,CONTRIBUCI,SUP_TERR,ANO_CONSTR,SUP_CONSTR,UF_TRANS,ESTACIONAM,SC_TPRIV,
+                                TPR_CBD,TPR_ElGolf,TPR_NvaLCo,TPR_Provi,Casas_UFPr,Depto_UFPr,IMORANCASA,IMORANDPTO,ABC1_12,
+                                C2_12,C3_12,D_12,E_12,ABC1_12P,C2_12P,C3_12P,D_12P,E_12P,POB_FLOT,Por_veg_pr,HA_MZ,DEN_MZ,SC_15MIN,
+                                Ten_Metro,Ten_MetroC,COLE_5MIN,COLE_10MIN,COLE_10MIN,JARDIN_5M,JARDIN_10M,JARDIN_15M,AV_15_MIN,
+                                COMERCIO,EDUCACION,SALUD,SERVICIOS,OFICINA,IMORANCASA,IMORANDPTO,geometry)
+
+
+#Reemplazamos los na por la media de su columna
+NA2mean = function(x) replace(x, is.na(x),mean(x, na.rm = TRUE))
+datos_sin_na = replace(data_s, TRUE, lapply(data_s, NA2mean))
+geom_sin_na = replace(geom_s, TRUE, lapply(geom_s, NA2mean))
+
+#Graficamos los datos de las condes
+plot(st_geometry(geom_sin_na))
+```
+
+```{r}
+#----------------Hacemos un PCA para determinar cuales son las variables que más información aportan----------------
+pca = prcomp(datos_sin_na,scale=T)
+summary(pca)
+
+#Calculamos y graficamos la varianza de cada componente
+prop_varianza = pca$sdev^2 / sum(pca$sdev^2)
+prop_varianza
+ggplot(data = data.frame(prop_varianza, pc = 1:46),
+       aes(x = pc, y = prop_varianza)) +
+  geom_col(width = 0.3) +
+  scale_y_continuous(limits = c(0,1)) +
+  theme_bw() +
+  labs(x = "Componente principal",
+       y = "Prop. de varianza explicada")
+
+#Calculamos y graficamos la varianza acumulada
+prop_varianza_acum = cumsum(prop_varianza)
+prop_varianza_acum
+ggplot(data = data.frame(prop_varianza_acum, pc = 1:46),
+       aes(x = pc, y = prop_varianza_acum, group = 1)) +
+  geom_point() +
+  geom_line() +
+  theme_bw() +
+  labs(x = "Componente principal",
+       y = "Prop. varianza explicada acumulada")
+
+```
+
+```{r}
+#Calculamos los eigenvalues, que nos ayudan a retener las componentes más importantes bajo el criterio de
+# eigenvalue >= 1
+eig.val = get_eigenvalue(pca)
+eig.val #de esta tabla concluimos con que las principales 13 componentes sirven
+
+
+#A continuación vemos que variables son las que más peso/información tienen en cada componente
+var = get_pca_var(pca)
+a = fviz_contrib(pca, "var", axes=1, xtickslab.rt=90) 
+plot(a,main = "Contribución en el porcentaje de varianza para la primea componente")
+
+a = fviz_contrib(pca, "var", axes=2, xtickslab.rt=90) 
+plot(a,main = "Contribución en el porcentaje de varianza para la segunda componente")
+
+a = fviz_contrib(pca, "var", axes=3, xtickslab.rt=90) 
+plot(a,main = "Contribución en el porcentaje de varianza para la tercera componente")
+
+a = fviz_contrib(pca, "var", axes=4, xtickslab.rt=90) 
+plot(a,main = "Contribución en el porcentaje de varianza para la cuarta componente")
+
+a = fviz_contrib(pca, "var", axes=5, xtickslab.rt=90)
+plot(a,main = "Contribución en el porcentaje de varianza para la quinta componente")
+
+a = fviz_contrib(pca, "var", axes=11, xtickslab.rt=90)
+plot(a,main = "Contribución en el porcentaje de varianza para la onceava componente")
+
+a = fviz_contrib(pca, "var", axes=12, xtickslab.rt=90)
+plot(a,main = "Contribución en el porcentaje de varianza para la doceava componente")
+```
+Para la primera componente del PCA, vemos que las variables que más información aportan son aquellas que indican el tiempo de transporte hacia lugares como el Golf, Providencia, etc. 
+
+Para la segunda componente las variables más importantes son aquellas que indican los metros cuadrados de los departamentos y casas de la manzana. 
+
+Para la tercera componente encontramos que las variables relacionadas a los servicios son las que más destacan, como SALUD, EDUCACIÓN, COMERCIO, SERVICIO, etc.
+
+Para la cuarta componente notamos que variables como CONTRIBUCION y 
+AVALUO, son las que más impacto tienen.
+
+Para la quinta componente las variables con más peso son aquellas que describen el nivel socio económico de los habitantes.
+De este pequeño análisis descubrimos que las variables de tiempo de traslado, metraje de la vivienda, servicios cercanos son las que más peso o información aportan, esto lo comprobamos midiendo la varianza acumulada, en dónde estás 3 características aportan el 41% de la información, y si usamos las 5 mencionadas en las componentes, llegamos a un 51%.
+
+Por otro lado, si analizamos las componentes 11 y 12, vemos que recién ahí aparecen los años, ANO y ANO_CONSTR, lo que nos hace confirmar que esas variables no aportan mucha información.
+
+
+# Modelamiento
+
+Modelamiento del problema:
+	
+	A continuación en base a los resultados obtenidos del procedimiento anterior de limpieza y procesamiento de datos, se procedió a realizar nuevamente un PCA el cual tiene como finalidad poder determinar las variables que mejor describen el comportamiento general de los datos entre estos 13 componentes de mayor peso. 
+Posteriormente de haber realizado el PCA se realizó el clustering. Para este trabajo se escogió utilizar el método K means. Este es un método de agrupamiento, que tiene como objetivo la partición de un conjunto de n observaciones en k grupos en el que cada observación pertenece al grupo cuyo valor medio es más cercano. Esta agrupación se basa en sus distintas características, minimizando la suma de distancias entre cada objeto y el centroide de su grupo o cluster.
+Antes de realizar el K means, lo primero que se debe determinar es el número de cluster. para esto nosotros utilizamos el método de silhouette. Esto indica que tan similar es un objeto a su propio “cúmulo” en comparación con los otros cúmulos. mientras mayor sea el valor de la silueta mejor emparejado está con su propio cúmulo y mal emparejado con sus vecinos, por lo que, si la mayoría de los objetos tiene un valor alto, se puede decir que la configuración del cúmulo es apropiada, si muchos valores son bajos o negativos, se puede concluir que la cantidad de cúmulos es mucha o muy poca. De esta forma se logró asignar la cantidad de clusters que debería tener el K Means, obteniendo una cantidad de 6 clusters.
+
+### PCA con las variables seleccionadas
+```{r}
+#--------------Hacemos otro PCA pero con las componentes seleccionadas------------------
+#Como encontramos que 13 componentes cumplian con el eigenvalue >= 1, haremos un nuevo pca con 13 componentes
+pca1 = prcomp(datos_sin_na, scale.=TRUE, rank. = 13) 
+
+summary(pca1)
+resultados <- pca1$x
+str(resultados)
+```
+
+### Kmeans
+
+```{r}
+#Hacemos un Kmeans con los resultados del PCA
+fviz_nbclust(resultados, kmeans, method = c("silhouette")) #Encontramos el número optimo de clusters (6)
+kmeans_optimo = kmeans(resultados,centers = 6)
+#kmeans_optimo
+
+geom_sin_na$cluster_kmeans = as.factor(kmeans_optimo$cluster) #agregamos a los datos la columna que asigna cada fila a un cluster
+plot(geom_sin_na$cluster_kmeans) #frecuencia de cada cluster
+
+geom_k = geom_sin_na %>% dplyr::select(cluster_kmeans,geometry) 
+ggplot(geom_sin_na) +
+  geom_sf(aes(color = cluster_kmeans))
+
+
+datos_sin_na$cluster_kmeans = as.factor(kmeans_optimo$cluster) #agregamos a los datos la columna que asigna cada fila a un cluster
+```
+
+# Análisis de datos
+
+Análisis de resultados:
+De las variables que se retuvieron tras considerar los 13 componentes del PCA, y observando el cluster obtenido del K means, uno puede observar que se produjeron 6 clusters distintos, siendo el cluster más grande el número 2 con 6817 puntos y el cluster más pequeño fue el número 4 con 415 puntos respectivamente.
+Observando las diferentes variables dentro de cada cluster, podemos obtener datos que diferencian a los clusters entre sí, estos pueden ser la distancia a los diferentes subcentros, el número de habitantes, la educación, el comercio, entre muchas otras.
+
+```{r}
+#------------------ESTA SECCIÓN ARROJA LAS TABLAS DE CADA CLUSTER-----------
+#------------------DECOMENTAR EN CASO DE COMPROBAR LA INFORMACIÓN-----------
+#primer_cluster = datos_sin_na %>% dplyr::filter(cluster_kmeans == 1)
+#summary(primer_cluster)
+
+#segundo_cluster = datos_sin_na %>% dplyr::filter(cluster_kmeans == 2)
+#summary(segundo_cluster)
+
+#tercer_cluster = datos_sin_na %>% dplyr::filter(cluster_kmeans == 3)
+#summary(tercer_cluster)
+
+#cuarto_cluster = datos_sin_na %>% dplyr::filter(cluster_kmeans == 4)
+#summary(cuarto_cluster)
+
+#quinto_cluster = datos_sin_na %>% dplyr::filter(cluster_kmeans == 5)
+#summary(quinto_cluster)
+
+#sexto_cluster = datos_sin_na %>% dplyr::filter(cluster_kmeans == 6)
+#summary(sexto_cluster)
+```
+
+
+El cluster 1 corresponde a casas de un ingreso medio-alto, estas viviendas solamente se encuentran cerca de oficinas de trabajo, es decir que todos los otros puntos como educación, salud, entre otros, están más bien alejados de este cluster, por lo que pueden corresponder a grupos de adultos jóvenes trabajadores.
+
+El cluster 2 podría corresponder a departamentos debido a la superficie de m2 y cantidad de estacionamientos de la que disponen, también son viviendas muy cercanas a medios de transporte, por lo que este cluster se caracteriza por personas de un ingreso medio que buscan tener un fácil acceso a medios de transporte.
+
+El cluster 3 corresponde a viviendas que apuntan a la misma utilidad que el cluster 2, con diferencia de que corresponden a viviendas más nuevas y también de una superficie mayor, además las personas que están en estas viviendas tienen un nivel socioeconómico medio-alto, mayor a las personas del cluster 2.
+
+El cluster 4 corresponde a viviendas de bajos recursos, que se encuentran alejadas de los subcentros y colegios de la comuna, este cluster podría corresponder a poblaciones o viviendas sociales presentes en la comuna de las Condes. 
+
+El cluster 5 corresponde a casas de un ingreso medio-alto con el mayor porcentaje de cercanía a colegios y jardines, además de también estar cerca de centros de salud, pero lejos de servicios, este cluster puede corresponder a grupos de familia que buscan tener fuentes de educación cercanas para sus hijos.
+
+El cluster 6 corresponde a viviendas de alto recursos. Con viviendas grandes y patios grandes. El 82% del cluster son abc1, es decir, clase alta y media lata. En esta agrupación se ve que hay pocos estacionamientos, esto nos indica que no hay mucha construcción de edificios, lo cual tiene sentido, debido a que es el cluster un una menor densidad por manzana. Este grupo de viviendas se encuentra alejada del transporte público y comercios. Son el cluster con los precios más elevados.
+
+
+```{r}
+#-----------Visualizamos los clusters----------------------
+#Hacemos un boxplot de las variables que más peso tenian en cada componente de los 5 primeros PCA, para compararlos por cluster
+boxplot(datos_sin_na$TPR_ElGolf ~ datos_sin_na$cluster_kmeans)
+boxplot(datos_sin_na$Depto_UFPr ~ datos_sin_na$cluster_kmeans)
+boxplot(datos_sin_na$EDUCACION ~ datos_sin_na$cluster_kmeans)
+boxplot(datos_sin_na$CONTRIBUCI ~ datos_sin_na$cluster_kmeans)
+boxplot(datos_sin_na$C2_12 ~ datos_sin_na$cluster_kmeans)
+
+#Viendo el boxplot de las UF nos damos cuenta que hay valores que se escapan mucho de los bigotes del box plot, por lo que 
+# filtraremos hasta un precio máximo de 10.000 uf 
+boxplot(datos_sin_na$UF_TRANS ~ datos_sin_na$cluster_kmeans)
+
+datos_sin_na = datos_sin_na %>% dplyr::filter(UF_TRANS < 10000 )
+geom_sin_na = geom_sin_na %>% dplyr::filter(UF_TRANS < 10000 )
+boxplot(datos_sin_na$UF_TRANS ~ datos_sin_na$cluster_kmeans)
+
+
+#Graficamos la media de UF por cada cluster
+ggplot(geom_sin_na) + 
+  geom_bar(aes(cluster_kmeans, UF_TRANS, fill = as.factor(cluster_kmeans)), 
+           position = "dodge", stat = "summary", fun.y = "mean")
+
+```
+Conclusión: 
+
+En conclusión sabemos que los resultados obtenidos por el k means tiene un gran peso y robustez  debido a los PCA realizados con anterioridad, logrando obtener componentes que contienen toda la información necesaria de todas las variables utilizadas. 
+Por otra parte, tras el análisis mencionado recién, variables como el transporte privado a SC el golf, el UF/m2 promedio por manzana, tiempo a establecimientos educacionales, monto de contribuciones, los estrato económicos, etc, son las variables que más afectan en el precio de las viviendas ubicadas en la comuna de las condes, ya que estas son las que más información aportaron a los componentes del PCA.
+
+Como conclusión de la hipótesis, fuimos capaces de confirmar que las variables de tiempo de transporte, metros cuadrados de la vivienda y cercanía a servicios, son las que más nos ayudan para agrupar las viviendas y que nos servían posteriormente, en el clustering, para entender qué significaba cada cluster y así, entender mejor su distribución del precia a lo largo de las condes. 
+
+
+De esto podemos afirmar que se observaron 6 grupos con notorias diferencias y características respecto a su ubicación, densidad poblacional, estrato económico, viviendas y precios. Siendo el cluster 6 el que tiene precios más elevados en sus viviendas, mientras que el cluster 4 es el que tiene menores precios.
+
+Referencias:
+ 
+https://rpubs.com/Bury/ClusteringOnPcaResults
+
+Tabla propia de datos de los clusters:tabla geo
+
